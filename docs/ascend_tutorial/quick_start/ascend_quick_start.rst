@@ -193,11 +193,9 @@ verl 中昇腾暂不支持生态库如下：
     +---------------+----------------+
     | flash_attn    | not supported  |
     +---------------+----------------+
-    | liger-kernel  | not supported  |
-    +---------------+----------------+
     
     1. 不支持通过 flash_attn 使能 flash attention 加速，支持通过 transformers 使用。
-    2. 不支持 liger-kernel 使能。
+    2. liger-kernel 需要 v0.8.0 及以上版本。
 
 
 快速开始
