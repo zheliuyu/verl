@@ -66,6 +66,9 @@ fused_kernel_options:
   # the implementation backend for fused kernels.
   impl_backend: torch
 
+# whether to apply Ascend NPU monkey-patch kernels in transformers (incompatible with use_liger).
+use_npu_patch_kernels: True
+
 # TiledMLP configuration for memory-efficient MLP computation.
 # Reduces peak memory by processing MLP forward/backward in tiles.
 tiled_mlp:
