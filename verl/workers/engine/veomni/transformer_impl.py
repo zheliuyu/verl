@@ -21,6 +21,7 @@ import torch
 import torch.distributed as dist
 from tensordict import TensorDict
 from torch.distributed.tensor import DTensor
+from veomni.arguments import OpsImplementationConfig
 from veomni.distributed import parallel_state
 from veomni.distributed.offloading import build_activation_offloading_context
 from veomni.distributed.torch_parallelize import build_parallelize_model
@@ -194,13 +195,26 @@ class VeOmniEngine(FSDPEngine):
         return lr_scheduler
 
     def _build_model_optimizer(self):
+        # build_foundation_model runs apply_ops_config(ops_implementation)
+        # before constructing the model, so per-model device_patch files see
+        # the resolved kernel backends.
+        ops_implementation = OpsImplementationConfig(
+            attn_implementation=self.engine_config.attn_implementation,
+            moe_implementation=self.engine_config.moe_implementation,
+            cross_entropy_loss_implementation=self.engine_config.cross_entropy_loss_implementation,
+            rms_norm_implementation=self.engine_config.rms_norm_implementation,
+            swiglu_mlp_implementation=self.engine_config.swiglu_mlp_implementation,
+            rotary_pos_emb_implementation=self.engine_config.rotary_pos_emb_implementation,
+            load_balancing_loss_implementation=self.engine_config.load_balancing_loss_implementation,
+        )
+
         # Load base model with specified configuration and dtype
         module = build_foundation_model(
             config_path=self.model_config.local_hf_config_path,
             weights_path=self.model_config.local_path,
             torch_dtype="float32" if self.engine_config.mixed_precision else "bfloat16",
             attn_implementation=self.engine_config.attn_implementation,
-            moe_implementation=self.engine_config.moe_implementation,
+            ops_implementation=ops_implementation,
             init_device=self.engine_config.init_device,
         )
         log_gpu_memory_usage("After load base model", logger=logger)
@@ -438,7 +452,7 @@ class VeOmniEngine(FSDPEngine):
 
                 if is_expert_layer and is_proj and ps.ep_enabled:
                     output_shape = list(unsharded_tensor.shape)
-                    output_shape[0] *= ps.ep_size
+                    output_shape[0] *= ps.extra_parallel_sizes["ep"]
                     stacked_tensor = torch.empty(output_shape, dtype=unsharded_tensor.dtype, device=device)
 
                     # all gather expert tensors [32, H, I] -> [128, H, I]
@@ -634,5 +648,17 @@ class VeOmniEngineWithLMHead(VeOmniEngine, FSDPEngineWithLMHead):
             model_inputs.update(_prepare_veomni_flash_attention_kwargs(model_inputs["position_ids"]))
             if sp_enabled:
                 model_inputs["position_ids"] = sp_shard_collator.sp_slice(model_inputs["position_ids"], dim=-1)
+
+        # Activate VeOmni's chunk_logprobs path: ForCausalLMLoss short-circuits
+        # to per-token log_probs/entropy on return_log_probs=True. Pass the
+        # already-rolled labels as shift_labels so chunk_logprobs skips its
+        # internal causal shift and the output seq length matches the input —
+        # prepare_model_outputs().squeeze(0) then lands at (total_nnz,).
+        use_fused_kernels = tu.get_non_tensor_data(data=micro_batch, key="use_fused_kernels", default=False)
+        if use_fused_kernels and use_remove_padding:
+            shift_labels = output_args["input_ids_rmpad_rolled"].unsqueeze(0)
+            model_inputs["labels"] = input_ids_rmpad
+            model_inputs["shift_labels"] = shift_labels
+            model_inputs["return_log_probs"] = True
 
         return model_inputs, output_args
