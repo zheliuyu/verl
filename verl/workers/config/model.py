@@ -138,9 +138,6 @@ class HFModelConfig(BaseConfig):
     use_fused_kernels: bool = False
     fused_kernel_options: dict = field(default_factory=dict)
 
-    # Whether to use npu patch kernels
-    use_npu_patch_kernels: bool = True
-
     # TiledMLP configuration for memory-efficient MLP computation
     tiled_mlp: dict = field(default_factory=lambda: {"enabled": False, "num_shards": 4})
 

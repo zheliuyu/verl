@@ -38,7 +38,7 @@ from verl.utils.activation_offload import enable_activation_offloading
 from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
 from verl.utils.dataset.dataset_utils import DatasetPadMode
 from verl.utils.debug import log_gpu_memory_usage
-from verl.utils.device import get_device_id, get_device_name, is_npu_available
+from verl.utils.device import get_device_id, get_device_name
 from verl.utils.fsdp_utils import (
     CPUOffloadPolicy,
     FSDPModule,
@@ -115,12 +115,7 @@ class FSDPEngine(BaseEngine):
 
         self.rank = torch.distributed.get_rank()
 
-        # Apply NPU patches for FSDP backend (only after validating real model config).
-        if is_npu_available:
-            if self.model_config.get("use_npu_patch_kernels", True) and self.model_config.get("use_liger", False):
-                raise ValueError(
-                    "Cannot enable both model.use_npu_patch_kernels and model.use_liger. Disable one of them."
-                )
+        # Apply NPU patches for FSDP backend
         from .utils import apply_npu_fsdp_patches
 
         apply_npu_fsdp_patches(self.model_config)
